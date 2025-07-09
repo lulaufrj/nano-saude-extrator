@@ -29,26 +29,27 @@ def extrair_linhas_pdf(fpath):
                 linhas += [l.strip() for l in texto.split('\n') if l.strip()]
     return linhas
 
-def juntar_linhas(linhas, idx_ini):
+def agrupar_linhas(linhas, start, tipo='titulo'):
+    """
+    Agrupa linhas consecutivas do título ou dos autores.
+    - Para título: Junta linhas até encontrar uma linha que pareça lista de autores.
+    - Para autores: Junta linhas até encontrar keywords, affiliations, e-mails, etc.
+    """
     bloco = []
-    for linha in linhas[idx_ini:]:
-        if not linha:
-            break
-        bloco.append(linha)
-    return bloco
-
-def achar_autores_bloco(linhas, inicio):
-    bloco = []
-    dentro = False
-    for l in linhas[inicio:]:
-        if (',' in l or '*' in l) and (re.search(r'[A-Za-z]', l)):
-            bloco.append(l)
-            dentro = True
-        elif dentro and l:
-            bloco.append(l)
-        else:
-            if dentro:
+    if tipo == 'titulo':
+        for l in linhas[start:]:
+            if not l: break
+            # Se linha parece autores (tem vírgula e nomes próprios OU tem * de apresentador), para
+            if (re.match(r'.*\\*.*|.*,.*', l) and len(l.split()) < 30):
                 break
+            bloco.append(l)
+    elif tipo == 'autores':
+        for l in linhas[start:]:
+            if not l: break
+            # Para se encontrar palavras típicas de seção, afiliação, keywords, email, etc
+            if re.search(r'keywords|palavras[- ]chave|instituto|univ|@|introduction|affiliation|\\d\\)|\\[\\d+\\]', l, re.I):
+                break
+            bloco.append(l)
     return bloco
 
 def processar_resumos(list_files):
@@ -61,24 +62,14 @@ def processar_resumos(list_files):
             linhas = extrair_linhas_pdf(fpath)
         else:
             continue
-        # Localiza primeira linha de texto relevante (título)
-        idx_titulo = next((ix for ix, l in enumerate(linhas) if len(l) > 10), None)
-        if idx_titulo is None:
+        # Busca índice do título: pula linhas pequenas e cabeçalhos
+        idx = next((ix for ix, l in enumerate(linhas) if len(l.strip()) > 10), None)
+        if idx is None:
             continue
-        # Junta linhas do título (até encontrar linha vazia ou linha só com nomes de pessoas)
-        titulo_bloc = [linhas[idx_titulo]]
-        for off in range(idx_titulo + 1, len(linhas)):
-            l = linhas[off]
-            if (re.match(r'^[A-Z][a-z]+( [A-Z][a-z]+)+', l) or '*' in l or re.search(r'\d', l)) and ',' in l:
-                break
-            if l and len(l) > 5:
-                titulo_bloc.append(l)
-            else:
-                break
+        titulo_bloc = agrupar_linhas(linhas, idx, tipo='titulo')
         titulo = ' '.join(titulo_bloc)
-        # Agora localiza início da linha dos autores
-        idx_autores = idx_titulo + len(titulo_bloc)
-        autores_bloc = achar_autores_bloco(linhas, idx_autores)
+        idx_autores = idx + len(titulo_bloc)
+        autores_bloc = agrupar_linhas(linhas, idx_autores, tipo='autores')
         autores_texto = ' '.join(autores_bloc)
         autores_lista = [a.strip() for a in re.split(r',|;', autores_texto) if a.strip()]
         apresentador = None
