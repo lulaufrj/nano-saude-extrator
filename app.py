@@ -29,28 +29,31 @@ def extrair_linhas_pdf(fpath):
                 linhas += [l.strip() for l in texto.split('\n') if l.strip()]
     return linhas
 
-def agrupar_linhas(linhas, start, tipo='titulo'):
-    """
-    Agrupa linhas consecutivas do título ou dos autores.
-    - Para título: Junta linhas até encontrar uma linha que pareça lista de autores.
-    - Para autores: Junta linhas até encontrar keywords, affiliations, e-mails, etc.
-    """
-    bloco = []
-    if tipo == 'titulo':
-        for l in linhas[start:]:
-            if not l: break
-            # Se linha parece autores (tem vírgula e nomes próprios OU tem * de apresentador), para
-            if (re.match(r'.*\\*.*|.*,.*', l) and len(l.split()) < 30):
-                break
-            bloco.append(l)
-    elif tipo == 'autores':
-        for l in linhas[start:]:
-            if not l: break
-            # Para se encontrar palavras típicas de seção, afiliação, keywords, email, etc
-            if re.search(r'keywords|palavras[- ]chave|instituto|univ|@|introduction|affiliation|\\d\\)|\\[\\d+\\]', l, re.I):
-                break
-            bloco.append(l)
-    return bloco
+def identificar_blocos(linhas):
+    # Encontrar início do título (primeira linha longa)
+    idx_titulo = next((ix for ix, l in enumerate(linhas) if len(l.strip()) > 10), None)
+    if idx_titulo is None:
+        return '', '', ''
+    # Pega o bloco do título: vai até linha que claramente contenha nomes próprios ou asterisco (autor)
+    bloco_titulo = []
+    for ix, l in enumerate(linhas[idx_titulo:], start=idx_titulo):
+        if re.search(r'([A-Z][a-z]+ [A-Z][\w\.-]+.*[,\*])', l) or (',' in l and '*' in l):
+            idx_autor = ix
+            break
+        bloco_titulo.append(l)
+    else:
+        idx_autor = idx_titulo + len(bloco_titulo)
+    titulo = ' '.join(bloco_titulo)
+    # Pega bloco de autores: linhas curtas sem palavras-chave institucionais
+    bloco_autores = []
+    idx_fim_autor = idx_autor
+    for ix, l in enumerate(linhas[idx_autor:], start=idx_autor):
+        if (re.search(r'(institut|universid|@|palavras|keywords|introduction|abstract|\b[Cc]orresponding|[Ee]mail|\b[0-9]{1,2}\.|\b[1-9]\))', l) or len(l.split()) > 20):
+            break
+        bloco_autores.append(l)
+        idx_fim_autor = ix + 1
+    autores_texto = ' '.join(bloco_autores)
+    return titulo, autores_texto, idx_fim_autor
 
 def processar_resumos(list_files):
     trabalhos = []
@@ -62,15 +65,7 @@ def processar_resumos(list_files):
             linhas = extrair_linhas_pdf(fpath)
         else:
             continue
-        # Busca índice do título: pula linhas pequenas e cabeçalhos
-        idx = next((ix for ix, l in enumerate(linhas) if len(l.strip()) > 10), None)
-        if idx is None:
-            continue
-        titulo_bloc = agrupar_linhas(linhas, idx, tipo='titulo')
-        titulo = ' '.join(titulo_bloc)
-        idx_autores = idx + len(titulo_bloc)
-        autores_bloc = agrupar_linhas(linhas, idx_autores, tipo='autores')
-        autores_texto = ' '.join(autores_bloc)
+        titulo, autores_texto, _ = identificar_blocos(linhas)
         autores_lista = [a.strip() for a in re.split(r',|;', autores_texto) if a.strip()]
         apresentador = None
         demais = []
